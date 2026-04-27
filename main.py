@@ -1,9 +1,12 @@
 import asyncio
 import logging
 import os
+import uuid
+from typing import Dict
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from groq import Groq
 
 
@@ -68,11 +71,16 @@ validate_config()
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 groq_client = Groq(api_key=GROQ_KEY)
+pending_messages: Dict[str, str] = {}
 
 
 async def ai_moderate(text: str) -> str:
     prompt = (
         "Ты модератор предложки в Телеграм-канал. "
+        "Обычные, нейтральные и бытовые сообщения нужно ОДОБРЯТЬ. "
+        "Отклоняй только явные нарушения: угрозы, призывы к насилию, мошенничество, "
+        "экстремизм, откровенные оскорбления, запрещённый контент. "
+        "Если сомневаешься, выбери MAYBE. "
         "Ответь ОДНИМ словом: APPROVE / REJECT / MAYBE.\n\n"
         f"Текст: {text}"
     )
@@ -106,6 +114,9 @@ async def start_handler(message: types.Message) -> None:
 
 @dp.message()
 async def handle_text(message: types.Message) -> None:
+    if message.chat.id in {ADMIN_GROUP_ID, CHANNEL_ID}:
+        return
+
     if not message.text:
         await message.answer("Пока проверяю только текст.")
         return
@@ -121,11 +132,55 @@ async def handle_text(message: types.Message) -> None:
         await message.answer("✅ APPROVE: отправлено в канал")
         return
 
+    request_id = uuid.uuid4().hex[:12]
+    pending_messages[request_id] = message.text
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Принять", callback_data=f"approve:{request_id}"),
+                InlineKeyboardButton(text="❌ Отказать", callback_data=f"reject:{request_id}"),
+            ]
+        ]
+    )
+
     await bot.send_message(
         chat_id=ADMIN_GROUP_ID,
         text=f"📩 {verdict} от {username}:\n\n{message.text}",
+        reply_markup=keyboard,
     )
     await message.answer(f"🛡 {verdict}: отправлено админам")
+
+
+@dp.callback_query()
+async def moderation_callback(callback: types.CallbackQuery) -> None:
+    if not callback.data:
+        await callback.answer("Некорректная команда", show_alert=True)
+        return
+    if not callback.message:
+        await callback.answer("Сообщение не найдено", show_alert=True)
+        return
+
+    action, _, request_id = callback.data.partition(":")
+    text = pending_messages.get(request_id)
+
+    if action not in {"approve", "reject"} or not request_id:
+        await callback.answer("Неизвестное действие", show_alert=True)
+        return
+
+    if not text:
+        await callback.answer("Заявка уже обработана или устарела", show_alert=True)
+        return
+
+    if action == "approve":
+        await bot.send_message(chat_id=CHANNEL_ID, text=text)
+        await callback.message.edit_text(f"{callback.message.text}\n\n✅ Одобрено админом и отправлено в канал")
+        await callback.answer("Отправлено в канал")
+    else:
+        await callback.message.edit_text(f"{callback.message.text}\n\n❌ Отклонено админом")
+        await callback.answer("Отклонено")
+
+    pending_messages.pop(request_id, None)
 
 
 async def main() -> None:
