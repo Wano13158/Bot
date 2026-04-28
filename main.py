@@ -106,7 +106,7 @@ async def ai_moderate(text: str) -> str:
         "Если сомневаешься — MAYBE .\n\n"
 
         "ОТВЕТ СТРОГО:\n"
-        "APPROVE или MAYBE\n\n"
+        "APPROVE или MAYBE или REJECT\n\n"
 
         f"Текст: {text}"
     )
