@@ -86,13 +86,12 @@ def format_channel_text(bot_username: str, text: str) -> str:
 
 async def ai_moderate(text: str) -> str:
     prompt = (
-        "Ты строгий ИИ-модератор Telegram-канала.\n\n"
+        "Ты ИИ-модератор Telegram-канала.\n\n"
 
         "ПРАВИЛА:\n"
         "Отклоняй (REJECT), если есть:\n"
         "- личные данные (телефоны, юзернеймы, аккаунты)\n"
         "- призывы к насилию\n"
-        "- оскорбления или травля\n"
         "- 18+ контент\n"
         "- нацистская или экстремистская символика\n"
         "- геолокации или адреса\n"
@@ -107,7 +106,7 @@ async def ai_moderate(text: str) -> str:
         "Если сомневаешься — MAYBE .\n\n"
 
         "ОТВЕТ СТРОГО:\n"
-        "APPROVE или REJECT\n\n"
+        "APPROVE или MAYBE\n\n"
 
         f"Текст: {text}"
     )
