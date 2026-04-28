@@ -165,6 +165,11 @@ async def handle_text(message: types.Message) -> None:
         return
 
     verdict = await ai_moderate(source_text) if source_text else "MAYBE"
+
+    # Фото не публикуем автоматически только по подписи:
+    # даже при APPROVE отправляем на ручную проверку админам.
+    if is_photo and verdict == "APPROVE":
+        verdict = "MAYBE"
     username = f"@{message.from_user.username}" if message.from_user and message.from_user.username else "без username"
 
     channel_text = format_channel_text(BOT_USERNAME, source_text) if source_text else ""
