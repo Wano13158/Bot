@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import uuid
-from typing import Dict
+from typing import Dict, TypedDict
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
@@ -71,7 +71,12 @@ validate_config()
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 groq_client = Groq(api_key=GROQ_KEY)
-pending_messages: Dict[str, str] = {}
+class PendingMessage(TypedDict):
+    channel_text: str
+    user_id: int
+
+
+pending_messages: Dict[str, PendingMessage] = {}
 BOT_USERNAME = "@bot"
 
 
@@ -161,7 +166,10 @@ async def handle_text(message: types.Message) -> None:
         return
 
     request_id = uuid.uuid4().hex[:12]
-    pending_messages[request_id] = channel_text
+    pending_messages[request_id] = {
+        "channel_text": channel_text,
+        "user_id": message.from_user.id if message.from_user else message.chat.id,
+    }
 
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -190,21 +198,29 @@ async def moderation_callback(callback: types.CallbackQuery) -> None:
         return
 
     action, _, request_id = callback.data.partition(":")
-    text = pending_messages.get(request_id)
+    pending = pending_messages.get(request_id)
 
     if action not in {"approve", "reject"} or not request_id:
         await callback.answer("Неизвестное действие", show_alert=True)
         return
 
-    if not text:
+    if not pending:
         await callback.answer("Заявка уже обработана или устарела", show_alert=True)
         return
 
     if action == "approve":
-        await bot.send_message(chat_id=CHANNEL_ID, text=text)
+        await bot.send_message(chat_id=CHANNEL_ID, text=pending["channel_text"])
+        await bot.send_message(
+            chat_id=pending["user_id"],
+            text="✅ Твое сообщение принято админом и отправлено в канал.",
+        )
         await callback.message.edit_text(f"{callback.message.text}\n\n✅ Одобрено админом и отправлено в канал")
         await callback.answer("Отправлено в канал")
     else:
+        await bot.send_message(
+            chat_id=pending["user_id"],
+            text="❌ Твое сообщение отклонено админом.",
+        )
         await callback.message.edit_text(f"{callback.message.text}\n\n❌ Отклонено админом")
         await callback.answer("Отклонено")
 
