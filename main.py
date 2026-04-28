@@ -225,15 +225,23 @@ async def moderation_callback(callback: types.CallbackQuery) -> None:
         return
 
     action, _, request_id = callback.data.partition(":")
-    pending = pending_messages.get(request_id)
-
     if action not in {"approve", "reject"} or not request_id:
         await callback.answer("Неизвестное действие", show_alert=True)
         return
 
+    pending = pending_messages.pop(request_id, None)
     if not pending:
         await callback.answer("Заявка уже обработана или устарела", show_alert=True)
         return
+
+    # Сразу убираем кнопки, чтобы исключить повторное нажатие.
+    await callback.message.edit_reply_markup(reply_markup=None)
+
+    status_text = (
+        "✅ Одобрено админом и отправлено в канал"
+        if action == "approve"
+        else "❌ Отклонено админом"
+    )
 
     if action == "approve":
         await send_to_channel(
@@ -245,17 +253,20 @@ async def moderation_callback(callback: types.CallbackQuery) -> None:
             chat_id=pending["user_id"],
             text="✅ Твое сообщение принято админом и отправлено в канал.",
         )
-        await callback.message.edit_text(f"{callback.message.text}\n\n✅ Одобрено админом и отправлено в канал")
         await callback.answer("Отправлено в канал")
     else:
         await bot.send_message(
             chat_id=pending["user_id"],
             text="❌ Твое сообщение отклонено админом.",
         )
-        await callback.message.edit_text(f"{callback.message.text}\n\n❌ Отклонено админом")
         await callback.answer("Отклонено")
 
-    pending_messages.pop(request_id, None)
+    if callback.message.photo:
+        base_caption = callback.message.caption or ""
+        await callback.message.edit_caption(caption=f"{base_caption}\n\n{status_text}")
+    else:
+        base_text = callback.message.text or ""
+        await callback.message.edit_text(f"{base_text}\n\n{status_text}")
 
 
 async def main() -> None:
