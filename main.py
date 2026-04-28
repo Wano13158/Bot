@@ -72,7 +72,9 @@ bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 groq_client = Groq(api_key=GROQ_KEY)
 class PendingMessage(TypedDict):
-    channel_text: str
+    content_type: str
+    text: str
+    photo_file_id: str
     user_id: int
 
 
@@ -87,6 +89,13 @@ async def get_bot_username() -> str:
 
 def format_channel_text(bot_username: str, text: str) -> str:
     return f"By {bot_username}\n\n{text}"
+
+
+async def send_to_channel(content_type: str, text: str, photo_file_id: str) -> None:
+    if content_type == "photo":
+        await bot.send_photo(chat_id=CHANNEL_ID, photo=photo_file_id, caption=text or None)
+        return
+    await bot.send_message(chat_id=CHANNEL_ID, text=text)
 
 
 async def ai_moderate(text: str) -> str:
@@ -148,26 +157,30 @@ async def handle_text(message: types.Message) -> None:
     if message.chat.id in {ADMIN_GROUP_ID, CHANNEL_ID}:
         return
 
-    if not message.text:
-        await message.answer("Пока проверяю только текст.")
+    is_photo = bool(message.photo)
+    source_text = message.text or message.caption or ""
+
+    if not source_text and not is_photo:
+        await message.answer("Поддерживаю текст и фото с подписью.")
         return
 
-    verdict = await ai_moderate(message.text)
+    verdict = await ai_moderate(source_text) if source_text else "MAYBE"
     username = f"@{message.from_user.username}" if message.from_user and message.from_user.username else "без username"
 
-    channel_text = format_channel_text(BOT_USERNAME, message.text)
+    channel_text = format_channel_text(BOT_USERNAME, source_text) if source_text else ""
+    content_type = "photo" if is_photo else "text"
+    photo_file_id = message.photo[-1].file_id if is_photo else ""
 
     if verdict == "APPROVE":
-        await bot.send_message(
-            chat_id=CHANNEL_ID,
-            text=channel_text,
-        )
+        await send_to_channel(content_type=content_type, text=channel_text, photo_file_id=photo_file_id)
         await message.answer("✅ APPROVE: отправлено в канал")
         return
 
     request_id = uuid.uuid4().hex[:12]
     pending_messages[request_id] = {
-        "channel_text": channel_text,
+        "content_type": content_type,
+        "text": channel_text if channel_text else source_text,
+        "photo_file_id": photo_file_id,
         "user_id": message.from_user.id if message.from_user else message.chat.id,
     }
 
@@ -180,11 +193,20 @@ async def handle_text(message: types.Message) -> None:
         ]
     )
 
-    await bot.send_message(
-        chat_id=ADMIN_GROUP_ID,
-        text=f"📩 {verdict} от {username}:\n\n{message.text}",
-        reply_markup=keyboard,
-    )
+    admin_text = f"📩 {verdict} от {username}:\n\n{source_text or '(без текста)'}"
+    if is_photo:
+        await bot.send_photo(
+            chat_id=ADMIN_GROUP_ID,
+            photo=photo_file_id,
+            caption=admin_text,
+            reply_markup=keyboard,
+        )
+    else:
+        await bot.send_message(
+            chat_id=ADMIN_GROUP_ID,
+            text=admin_text,
+            reply_markup=keyboard,
+        )
     await message.answer(f"🛡 {verdict}: отправлено админам")
 
 
@@ -209,7 +231,11 @@ async def moderation_callback(callback: types.CallbackQuery) -> None:
         return
 
     if action == "approve":
-        await bot.send_message(chat_id=CHANNEL_ID, text=pending["channel_text"])
+        await send_to_channel(
+            content_type=pending["content_type"],
+            text=pending["text"],
+            photo_file_id=pending["photo_file_id"],
+        )
         await bot.send_message(
             chat_id=pending["user_id"],
             text="✅ Твое сообщение принято админом и отправлено в канал.",
