@@ -72,6 +72,16 @@ bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 groq_client = Groq(api_key=GROQ_KEY)
 pending_messages: Dict[str, str] = {}
+BOT_USERNAME = "@bot"
+
+
+async def get_bot_username() -> str:
+    me = await bot.get_me()
+    return f"@{me.username}" if me.username else "бот"
+
+
+def format_channel_text(bot_username: str, text: str) -> str:
+    return f"By {bot_username}\n\n{text}"
 
 
 async def ai_moderate(text: str) -> str:
@@ -124,16 +134,18 @@ async def handle_text(message: types.Message) -> None:
     verdict = await ai_moderate(message.text)
     username = f"@{message.from_user.username}" if message.from_user and message.from_user.username else "без username"
 
+    channel_text = format_channel_text(BOT_USERNAME, message.text)
+
     if verdict == "APPROVE":
         await bot.send_message(
             chat_id=CHANNEL_ID,
-            text=message.text,
+            text=channel_text,
         )
         await message.answer("✅ APPROVE: отправлено в канал")
         return
 
     request_id = uuid.uuid4().hex[:12]
-    pending_messages[request_id] = message.text
+    pending_messages[request_id] = channel_text
 
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -184,6 +196,8 @@ async def moderation_callback(callback: types.CallbackQuery) -> None:
 
 
 async def main() -> None:
+    global BOT_USERNAME
+    BOT_USERNAME = await get_bot_username()
     await dp.start_polling(bot)
 
 
